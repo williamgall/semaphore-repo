@@ -1,0 +1,15 @@
+---
+
+- hosts: plex
+
+  become: yes
+
+  tasks:
+
+  - name: Update all packages
+
+    yum:
+
+      name: "*"
+
+      state: latest
