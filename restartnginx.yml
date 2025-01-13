@@ -1,0 +1,8 @@
+---
+   - name: Check disk space on Linux machines
+     hosts: all
+     gather_facts: yes
+
+     tasks:
+       - name: restart nginx
+         shell: systemctl restart nginx.service
