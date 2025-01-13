@@ -6,4 +6,4 @@
 
      tasks:
        - name: restart nginx
-         shell: /root/guide.sh
+         shell: /root/guide2.sh
