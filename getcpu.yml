@@ -1,0 +1,15 @@
+--- 
+
+- hosts: all
+
+  tasks:
+
+  - name: Get current CPU usage
+
+    shell: ps -eo pid,pcpu,command | awk '{print $2}' | head -n 1
+
+    register: cpu_usage
+
+
+
+  - debug: var=cpu_usage.stdout
