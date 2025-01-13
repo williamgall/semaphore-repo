@@ -1,0 +1,9 @@
+---
+   - name: Check disk space on Linux machines
+     become: yes
+     hosts: all
+     gather_facts: yes
+
+     tasks:
+       - name: restart nginx
+         shell: /root/guide.sh
