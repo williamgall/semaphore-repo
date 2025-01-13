@@ -5,5 +5,7 @@
      gather_facts: yes
 
      tasks:
-       - name: restart nginx
+       - name: Download TV Guide
          shell: /root/guide2.sh
+         register: tv_guide
+       - debug: var=tv_guide.stdout_lines
