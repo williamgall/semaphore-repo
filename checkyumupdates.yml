@@ -1,0 +1,11 @@
+--- 
+- hosts: all
+  become: yes 
+  tasks:
+  - name: Check for available Yum updates 
+    yum: 
+      name: '*' 
+      check_update: yes 
+    register: updates  
+  - debug: var=updates.stdout_lines
+    when: updates.changed 
