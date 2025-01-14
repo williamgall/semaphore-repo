@@ -5,7 +5,7 @@
   gather_facts: false
   hosts: all
   tasks:
-
+    - debug: var=ansible_default_ipv4.address
     - name: Get config for VyOS devices
       ansible_default_ipv4.interface.ansible_facts:
         gather_subset: all
