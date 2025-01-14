@@ -1,11 +1,18 @@
---- 
+---
 - hosts: all
-  become: yes 
+  gather_facts: false
+  
   tasks:
-  - name: Check for available Yum updates 
-    dnf: 
-      name: '*' 
-      check_update: yes 
-    register: updates  
-  - debug: var=updates.stdout_lines
-    when: updates.changed 
+    - name: Check packages to upgrade
+      dnf:
+        list: updates
+      register: packages
+
+    - name: Show packages to upgrade
+      debug:
+        msg: >-
+          {%- set output=[] -%}
+          {%- for p in packages.results -%}
+          {{ output.append('%-40s' % (p.name ~ '-' ~ p.version) ~ ' | repo: ' ~ p.repo) }}
+          {%- endfor -%}
+          {{ output }}
