@@ -6,10 +6,4 @@
   hosts: all
   tasks:
     - debug: var=ansible_default_ipv4.address
-    - name: Get config for VyOS devices
-      ansible_default_ipv4.interface.ansible_facts:
-        gather_subset: all
-
-    - name: Display the config
-      debug:
-        msg: "The hostname is {{ ansible_net_hostname }} and the OS is {{ ansible_net_version }}"
+  
