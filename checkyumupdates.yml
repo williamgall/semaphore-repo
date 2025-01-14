@@ -3,7 +3,7 @@
   become: yes 
   tasks:
   - name: Check for available Yum updates 
-    yum: 
+    dnf: 
       name: '*' 
       check_update: yes 
     register: updates  
