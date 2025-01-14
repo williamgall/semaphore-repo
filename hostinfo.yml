@@ -7,7 +7,7 @@
   tasks:
 
     - name: Get config for VyOS devices
-      vyos.vyos.vyos_facts:
+      ansible_default_ipv4.interface.ansible_facts:
         gather_subset: all
 
     - name: Display the config
