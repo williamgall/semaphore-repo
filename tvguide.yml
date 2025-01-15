@@ -1,6 +1,7 @@
 ---
    - name: Check disk space on Linux machines
      become: yes
+     become_user: root
      hosts: all
      gather_facts: yes
 
