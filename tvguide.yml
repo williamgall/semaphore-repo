@@ -6,6 +6,7 @@
 
      tasks:
        - name: Download TV Guide
+         become: yes
          shell: /root/guide2.sh
          register: tv_guide
        - debug: var=tv_guide.stdout_lines
