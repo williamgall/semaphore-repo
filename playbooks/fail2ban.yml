@@ -1,0 +1,11 @@
+---
+   - name: Get fail2ban stats
+     hosts: all
+     gather_facts: yes
+     become: yes
+
+     tasks:
+       - name: Display fail2band stats
+         shell: fail2ban-client status
+         register: fail2ban
+       - debug: var=fail2ban.stdout_lines
