@@ -6,6 +6,6 @@
 
      tasks:
        - name: Display fail2band stats
-         shell: fail2ban-client status ssh
+         shell: fail2ban-client status sshd
          register: fail2ban
        - debug: var=fail2ban.stdout_lines
