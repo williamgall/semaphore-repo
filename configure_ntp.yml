@@ -1,0 +1,32 @@
+---
+- name: Configure NTP time synchronization using Chrony
+  hosts: all
+  become: true # This playbook requires root privileges
+
+  tasks:
+    - name: Install Chrony package
+      ansible.builtin.dnf:
+        name: chrony
+        state: present
+
+    - name: Configure Chrony servers
+      ansible.builtin.lineinfile:
+        path: /etc/chrony.conf
+        regex: regexp: '^(.*)pool 2.rocky.pool.ntp.org iburst(.*)$'
+        line: "server time.cloudflare.com iburst" # Replace with your NTP server
+#        insertafter: '^#.*server 3.centos.pool.ntp.org iburst'
+        state: present
+      notify:
+        - Restart chronyd service
+
+    - name: Enable and start Chrony service
+      ansible.builtin.service:
+        name: chronyd
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Restart chronyd service
+      ansible.builtin.service:
+        name: chronyd
+        state: restarted
