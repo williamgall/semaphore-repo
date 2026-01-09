@@ -1,13 +1,14 @@
 ---
-- name: Uses ansible_date_time fact to retrieve data and timestamp
-  hosts: all
+- name: Show current time using the now() function
+  hosts: localhost
+  connection: local
+  gather_facts: false # No facts needed for this method
 
   tasks:
+    - name: Display current local time (default format)
+      debug:
+        msg: "The current local time is {{ now() }}"
 
-  - name: Ansible fact - ansible_date_time
-    debug:
-     var: ansible_date_time
-
-  - name: Ansible fact - ansible_date_time.iso8601
-    debug:
-     msg: "Timestamp in the ISO8601 format: {{ ansible_date_time.iso8601 }}"
+    - name: Display current UTC time (specific format)
+      debug:
+        msg: "The current UTC time is {{ now(utc=True, fmt='%Y-%m-%d %H:%M:%S') }}"
