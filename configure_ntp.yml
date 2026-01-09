@@ -12,9 +12,8 @@
     - name: Configure Chrony servers
       ansible.builtin.lineinfile:
         path: /etc/chrony.conf
-        regex: regexp: '^(.*)pool 2.rocky.pool.ntp.org iburst(.*)$'
+        regexp: '^(.*)pool 2.rocky.pool.ntp.org iburst(.*)$'
         line: "server time.cloudflare.com iburst" # Replace with your NTP server
-#        insertafter: '^#.*server 3.centos.pool.ntp.org iburst'
         state: present
       notify:
         - Restart chronyd service
