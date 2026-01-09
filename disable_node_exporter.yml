@@ -1,0 +1,12 @@
+---
+- name: Disable and stop a service on Rocky Linux 9
+  hosts: all
+  become: true  # This is needed to run commands as root (required for service management)
+
+  tasks:
+    - name: Ensure 'node_exporter' is stopped and disabled
+      ansible.builtin.systemd:
+        name: node_exporter
+        state: stopped
+        enabled: false
+      # Replace 'example_service' with the actual name of your target service
