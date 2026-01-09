@@ -1,6 +1,6 @@
 ---
 - name: Show current time using the now() function
-  hosts: localhost
+  hosts: all
   connection: local
   gather_facts: false # No facts needed for this method
 
