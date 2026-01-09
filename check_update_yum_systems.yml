@@ -1,0 +1,25 @@
+---
+- name: Check for yum updates
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Gather list of available updates (yum/dnf)
+      ansible.builtin.yum:
+        list: updates
+        update_cache: yes
+      register: yum_output
+      # Use dnf module if the target host uses dnf (e.g., RHEL 8+, Fedora)
+      # replace 'ansible.builtin.yum' with 'ansible.builtin.dnf' as appropriate.
+
+    - name: Display the total count of updates
+      ansible.builtin.debug:
+        msg: "Hostname {{ inventory_hostname }} has {{ yum_output.results | list | length }} update(s) available."
+      when: yum_output.results | list | length > 0
+
+    - name: Display the list of pending updates
+      ansible.builtin.debug:
+        var: item
+      with_items: "{{ yum_output.results }}"
+      when: yum_output.results | list | length > 0
