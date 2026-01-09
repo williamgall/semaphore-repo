@@ -1,0 +1,25 @@
+---
+- name: Update all systems with yum/dnf
+  hosts: all
+  become: true # Use privilege escalation (sudo) to run as root
+  tasks:
+    - name: Update all installed packages
+      ansible.builtin.yum:
+        name: '*'
+        state: latest
+        update_only: true # Only update installed packages, do not install new ones
+        update_cache: true # Refresh the package cache before the update
+      register: update_status
+      # For modern systems using DNF, the module is interchangeable in recent Ansible versions
+      # If managing very old systems, you might need conditional logic (see Red Hat blog link below)
+
+    - name: Check if a reboot is needed (RHEL/CentOS specific)
+      ansible.builtin.command: /usr/bin/needs-restarting -r
+      register: reboot_required_cmd
+      ignore_errors: true # The command exits with specific codes, not standard success/failure
+      changed_when: false # This task doesn't change system state itself
+
+    - name: Reboot the system if required
+      ansible.builtin.reboot:
+        reboot_timeout: 600 # Wait up to 10 minutes for the host to come back
+      when: reboot_required_cmd.rc == 1 # needs-restarting returns 1 if a reboot is needed
