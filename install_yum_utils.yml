@@ -1,0 +1,15 @@
+---
+- name: Install yum-utils on Rocky Linux 9 hosts
+  hosts: all # Replace with the name of your host group from inventory
+  become: true # This allows the task to run with sudo/root privileges
+  tasks:
+    - name: Ensure yum-utils package is present
+      ansible.builtin.dnf:
+        name: yum-utils
+        state: present
+        update_cache: true # Optional: updates the package cache before installation
+      # Alternatively, you can use the 'yum' module for compatibility:
+      # ansible.builtin.yum:
+      #   name: yum-utils
+      #   state: present
+      #   update_cache: true
