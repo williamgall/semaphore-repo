@@ -1,16 +1,8 @@
 ---
-- name: Check for yum/dnf updates with readable, colorized output
+- name: Check for yum/dnf updates with readable output
   hosts: all
   become: true
   gather_facts: true
-
-  vars:
-    color_reset: "\u001b[0m"
-    color_red: "\u001b[31m"
-    color_yellow: "\u001b[33m"
-    color_green: "\u001b[32m"
-    color_cyan: "\u001b[36m"
-    color_bold: "\u001b[1m"
 
   tasks:
     - name: Determine package manager command
@@ -39,25 +31,31 @@
             | reject('equalto', '')
             | reject('search', '^(Loaded plugins:|Last metadata expiration check:|Update notice|Security notice|RHSA|ALAS|ELSA|CEBA|FEDORA-EPEL)')
             | map('regex_replace', '^\\S+\\s+(\\S+).*$', '\\1')
-            | map('regex_replace', '-[0-9][^-]*.*$', '')
+            | map('regex_replace', '\\.[^.]+$', '')
             | list
             | unique
           }}
 
+    - name: Initialize update list
+      ansible.builtin.set_fact:
+        update_list: []
+
     - name: Build structured update list
       ansible.builtin.set_fact:
-        update_list: "{{ (update_list | default([])) + [ {
-          'name': (pkg_name_arch | regex_replace('\\.[^.]+$', '')),
-          'arch': (pkg_name_arch | regex_search('\\.([^.]+)$', '\\1') | default(['unknown']) | first),
-          'full_name': pkg_name_arch,
+        update_list: "{{ update_list + [ {
+          'name': pkg_name,
+          'arch': pkg_arch,
           'version': pkg_version,
           'repo': pkg_repo,
-          'security': ((pkg_name_arch | regex_replace('\\.[^.]+$', '')) in security_package_names)
+          'security': (pkg_name in security_package_names)
         } ] }}"
       vars:
-        pkg_name_arch: "{{ (item.split())[0] }}"
-        pkg_version: "{{ (item.split())[1] if (item.split() | length) > 1 else 'unknown' }}"
-        pkg_repo: "{{ (item.split())[2] if (item.split() | length) > 2 else 'unknown' }}"
+        pkg_fields: "{{ item.split() }}"
+        pkg_full: "{{ pkg_fields[0] }}"
+        pkg_name: "{{ pkg_full | regex_replace('\\.[^.]+$', '') }}"
+        pkg_arch: "{{ pkg_full | regex_search('\\.([^.]+)$', '\\1') | default(['unknown']) | first }}"
+        pkg_version: "{{ pkg_fields[1] if (pkg_fields | length) > 1 else 'unknown' }}"
+        pkg_repo: "{{ pkg_fields[2] if (pkg_fields | length) > 2 else 'unknown' }}"
       loop: >-
         {{
           updates_raw.stdout_lines
@@ -67,50 +65,60 @@
           | reject('search', '^(Loaded plugins:|Last metadata expiration check:|Updated Packages|Available Upgrades)')
           | list
         }}
+      loop_control:
+        label: "{{ item.split()[0] if (item.split() | length) > 0 else item }}"
       when:
         - updates_raw.rc is defined
         - updates_raw.rc in [0, 100]
+      no_log: true
 
     - name: Sort updates with security first, then package name
       ansible.builtin.set_fact:
         sorted_updates: >-
           {{
-            (update_list | default([]))
+            update_list
             | sort(attribute='name')
             | sort(attribute='security', reverse=true)
           }}
 
+    - name: Build formatted update lines
+      ansible.builtin.set_fact:
+        formatted_update_lines: >-
+          {%- set lines = [] -%}
+          {%- for pkg in sorted_updates -%}
+          {%- set prefix = '[SECURITY]' if pkg.security else '[OTHER]' -%}
+          {%- set _ = lines.append(
+                '%-10s %-35s %-10s -> %-30s (%s)' | format(
+                  prefix,
+                  pkg.name,
+                  pkg.arch,
+                  pkg.version,
+                  pkg.repo
+                )
+              )
+          -%}
+          {%- endfor -%}
+          {{ lines }}
+
     - name: Show fully up-to-date hosts
       ansible.builtin.debug:
-        msg: >-
-          {{ color_bold }}{{ color_green }}Host {{ inventory_hostname }} is fully up to date.{{ color_reset }}
-      when: (sorted_updates | default([]) | length) == 0
+        msg: |
+          Host: {{ inventory_hostname }}
+          Status: Up to date
+          Total updates: 0
+          Security updates: 0
+      when: sorted_updates | length == 0
 
-    - name: Show update summary header
+    - name: Show readable update report
       ansible.builtin.debug:
         msg: |
-          {{ color_bold }}{{ color_cyan }}Host: {{ inventory_hostname }}{{ color_reset }}
-          {{ color_bold }}Total updates: {{ sorted_updates | length }}{{ color_reset }}
-          {{ color_bold }}Security updates: {{ sorted_updates | selectattr('security', 'equalto', true) | list | length }}{{ color_reset }}
-      when: (sorted_updates | default([]) | length) > 0
+          Host: {{ inventory_hostname }}
+          Status: Updates available
+          Total updates: {{ sorted_updates | length }}
+          Security updates: {{ sorted_updates | selectattr('security', 'equalto', true) | list | length }}
 
-    - name: Show sorted, colorized update list
-      ansible.builtin.debug:
-        msg: >-
-          {{
-            (
-              color_red + '[SECURITY] ' + color_reset
-              if item.security else
-              color_yellow + '[BUGFIX/OTHER] ' + color_reset
-            )
-            + item.name
-            + '.'
-            + item.arch
-            + ' -> '
-            + item.version
-            + ' (repo: '
-            + item.repo
-            + ')'
-          }}
-      loop: "{{ sorted_updates }}"
-      when: (sorted_updates | default([]) | length) > 0
+          -------------------------------------------------------------------------------
+          TYPE       PACKAGE                             ARCH       VERSION                        REPO
+          -------------------------------------------------------------------------------
+          {{ formatted_update_lines | join('\n') }}
+      when: sorted_updates | length > 0
