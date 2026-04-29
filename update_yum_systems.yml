@@ -1,6 +1,7 @@
 ---
 - name: Update all systems with yum/dnf
   hosts: all
+  serial: 1
   become: true
   gather_facts: true
 
