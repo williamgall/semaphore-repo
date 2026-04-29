@@ -21,84 +21,58 @@
       changed_when: false
       failed_when: false
 
-    - name: Build list of security package names
+    - name: Build parsed update lines
       ansible.builtin.set_fact:
-        security_package_names: >-
+        parsed_updates: >-
+          {%- set ns = namespace(items=[]) -%}
+          {%- set security_names = [] -%}
+
+          {%- for line in security_raw.stdout_lines | default([]) -%}
+            {%- set s = line | trim -%}
+            {%- if s and
+                  not s.startswith('Loaded plugins:') and
+                  not s.startswith('Last metadata expiration check:') -%}
+              {%- set parts = s.split() -%}
+              {%- if parts | length > 1 -%}
+                {%- set pkg_full = parts[1] -%}
+                {%- set pkg_name = pkg_full | regex_replace('\\.[^.]+$', '') -%}
+                {%- set _ = security_names.append(pkg_name) -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+
+          {%- for line in updates_raw.stdout_lines | default([]) -%}
+            {%- set s = line | trim -%}
+            {%- if s and
+                  not s.startswith('Loaded plugins:') and
+                  not s.startswith('Last metadata expiration check:') and
+                  s != 'Updated Packages' and
+                  s != 'Available Upgrades' and
+                  s != 'Obsoleting Packages' -%}
+              {%- set parts = s.split() -%}
+              {%- if parts | length >= 3 -%}
+                {%- set pkg_full = parts[0] -%}
+                {%- set pkg_name = pkg_full | regex_replace('\\.[^.]+$', '') -%}
+                {%- set pkg_arch = (pkg_full | regex_search('\\.([^.]+)$', '\\1') | default(['unknown']) | first) -%}
+                {%- set pkg_version = parts[1] -%}
+                {%- set pkg_repo = parts[2] -%}
+                {%- set _ = ns.items.append({
+                      'name': pkg_name,
+                      'arch': pkg_arch,
+                      'version': pkg_version,
+                      'repo': pkg_repo,
+                      'security': (pkg_name in security_names)
+                    }) -%}
+              {%- endif -%}
+            {%- endif -%}
+          {%- endfor -%}
+
           {{
-            security_raw.stdout_lines
-            | default([])
-            | map('trim')
-            | reject('equalto', '')
-            | reject('search', '^(Loaded plugins:|Last metadata expiration check:|Update notice|Security notice|RHSA|ALAS|ELSA|CEBA|FEDORA-EPEL)')
-            | map('regex_replace', '^\\S+\\s+(\\S+).*$', '\\1')
-            | map('regex_replace', '\\.[^.]+$', '')
-            | list
-            | unique
-          }}
-
-    - name: Initialize update list
-      ansible.builtin.set_fact:
-        update_list: []
-
-    - name: Build structured update list
-      ansible.builtin.set_fact:
-        update_list: "{{ update_list + [ {
-          'name': pkg_name,
-          'arch': pkg_arch,
-          'version': pkg_version,
-          'repo': pkg_repo,
-          'security': (pkg_name in security_package_names)
-        } ] }}"
-      vars:
-        pkg_fields: "{{ item.split() }}"
-        pkg_full: "{{ pkg_fields[0] }}"
-        pkg_name: "{{ pkg_full | regex_replace('\\.[^.]+$', '') }}"
-        pkg_arch: "{{ pkg_full | regex_search('\\.([^.]+)$', '\\1') | default(['unknown']) | first }}"
-        pkg_version: "{{ pkg_fields[1] if (pkg_fields | length) > 1 else 'unknown' }}"
-        pkg_repo: "{{ pkg_fields[2] if (pkg_fields | length) > 2 else 'unknown' }}"
-      loop: >-
-        {{
-          updates_raw.stdout_lines
-          | default([])
-          | map('trim')
-          | reject('equalto', '')
-          | reject('search', '^(Loaded plugins:|Last metadata expiration check:|Updated Packages|Available Upgrades)')
-          | list
-        }}
-      loop_control:
-        label: "{{ item.split()[0] if (item.split() | length) > 0 else item }}"
-      when:
-        - updates_raw.rc is defined
-        - updates_raw.rc in [0, 100]
-      no_log: true
-
-    - name: Sort updates with security first, then package name
-      ansible.builtin.set_fact:
-        sorted_updates: >-
-          {{
-            update_list
+            ns.items
             | sort(attribute='name')
             | sort(attribute='security', reverse=true)
           }}
-
-    - name: Build formatted update lines
-      ansible.builtin.set_fact:
-        formatted_update_lines: >-
-          {%- set lines = [] -%}
-          {%- for pkg in sorted_updates -%}
-          {%- set prefix = '[SECURITY]' if pkg.security else '[OTHER]' -%}
-          {%- set _ = lines.append(
-                '%-10s %-35s %-10s -> %-30s (%s)' | format(
-                  prefix,
-                  pkg.name,
-                  pkg.arch,
-                  pkg.version,
-                  pkg.repo
-                )
-              )
-          -%}
-          {%- endfor -%}
-          {{ lines }}
+      no_log: true
 
     - name: Show fully up-to-date hosts
       ansible.builtin.debug:
@@ -107,18 +81,25 @@
           Status: Up to date
           Total updates: 0
           Security updates: 0
-      when: sorted_updates | length == 0
+      when: parsed_updates | length == 0
 
     - name: Show readable update report
       ansible.builtin.debug:
         msg: |
           Host: {{ inventory_hostname }}
           Status: Updates available
-          Total updates: {{ sorted_updates | length }}
-          Security updates: {{ sorted_updates | selectattr('security', 'equalto', true) | list | length }}
+          Total updates: {{ parsed_updates | length }}
+          Security updates: {{ parsed_updates | selectattr('security', 'equalto', true) | list | length }}
 
-          -------------------------------------------------------------------------------
-          TYPE       PACKAGE                             ARCH       VERSION                        REPO
-          -------------------------------------------------------------------------------
-          {{ formatted_update_lines | join('\n') }}
-      when: sorted_updates | length > 0
+          TYPE        PACKAGE                          ARCH     VERSION                      REPO
+          ----------------------------------------------------------------------------------------
+          {% for pkg in parsed_updates %}
+          {{ '%-11s %-32s %-8s %-28s %s' | format(
+              '[SECURITY]' if pkg.security else '[OTHER]',
+              pkg.name,
+              pkg.arch,
+              pkg.version,
+              pkg.repo
+          ) }}
+          {% endfor %}
+      when: parsed_updates | length > 0
