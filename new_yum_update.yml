@@ -1,98 +1,303 @@
 ---
-- name: Check for yum/dnf updates with readable output
+- name: Check Linux servers for available updates
   hosts: all
   become: true
-  gather_facts: true
+  gather_facts: false
+
+  # Let each VM proceed independently.
+  # One slow VM will not hold up the other six.
+  strategy: free
+
+  vars:
+    package_command_timeout: 120
 
   tasks:
-    - name: Determine package manager command
+
+    # ---------------------------------------------------------
+    # Get only the fact we actually need.
+    # ---------------------------------------------------------
+
+    - name: Determine package manager
+      ansible.builtin.setup:
+        filter:
+          - ansible_pkg_mgr
+
+    - name: Set package manager command
       ansible.builtin.set_fact:
         pkg_mgr_cmd: "{{ 'dnf' if ansible_pkg_mgr == 'dnf' else 'yum' }}"
 
-    - name: Gather available updates
-      ansible.builtin.command: "{{ pkg_mgr_cmd }} -q list updates"
+    # ---------------------------------------------------------
+    # Check for all available updates.
+    #
+    # timeout returns:
+    #   124 = command exceeded timeout
+    #
+    # DNF/YUM check-update can return:
+    #   0   = no updates
+    #   100 = updates available
+    # ---------------------------------------------------------
+
+    - name: Check for available updates
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - "{{ package_command_timeout | string }}"
+          - "{{ pkg_mgr_cmd }}"
+          - -q
+          - check-update
       register: updates_raw
       changed_when: false
       failed_when: false
 
-    - name: Gather security update info
-      ansible.builtin.command: "{{ pkg_mgr_cmd }} -q updateinfo list security"
+    # ---------------------------------------------------------
+    # Check for security updates.
+    # ---------------------------------------------------------
+
+    - name: Check for security updates
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - "{{ package_command_timeout | string }}"
+          - "{{ pkg_mgr_cmd }}"
+          - -q
+          - updateinfo
+          - list
+          - security
       register: security_raw
       changed_when: false
       failed_when: false
 
-    - name: Build parsed update lines
+    # ---------------------------------------------------------
+    # Detect timeout/failure conditions.
+    # ---------------------------------------------------------
+
+    - name: Determine update check status
       ansible.builtin.set_fact:
-        parsed_updates: >-
-          {%- set ns = namespace(items=[]) -%}
-          {%- set security_names = [] -%}
+        update_check_timed_out: >-
+          {{
+            updates_raw.rc | default(0) == 124 or
+            security_raw.rc | default(0) == 124
+          }}
+
+        update_check_failed: >-
+          {{
+            (updates_raw.rc | default(0) not in [0, 100, 124]) or
+            (security_raw.rc | default(0) not in [0, 100, 124])
+          }}
+
+    # ---------------------------------------------------------
+    # Parse security package names.
+    # ---------------------------------------------------------
+
+    - name: Parse security update package names
+      ansible.builtin.set_fact:
+        security_package_names: >-
+          {%- set packages = [] -%}
 
           {%- for line in security_raw.stdout_lines | default([]) -%}
-            {%- set s = line | trim -%}
-            {%- if s and
-                  not s.startswith('Loaded plugins:') and
-                  not s.startswith('Last metadata expiration check:') -%}
-              {%- set parts = s.split() -%}
-              {%- if parts | length > 1 -%}
-                {%- set pkg_full = parts[1] -%}
-                {%- set pkg_name = pkg_full | regex_replace('\\.[^.]+$', '') -%}
-                {%- set _ = security_names.append(pkg_name) -%}
+
+            {%- set text = line | trim -%}
+
+            {%- if text
+                  and not text.startswith('Last metadata expiration check:')
+                  and not text.startswith('Loaded plugins:')
+                  and not text.startswith('Update ID')
+                  and not text.startswith('Updates Information Summary:') -%}
+
+              {%- set parts = text.split() -%}
+
+              {%- if parts | length >= 2 -%}
+
+                {%- set package_full = parts[1] -%}
+
+                {%- set package_name =
+                      package_full
+                      | regex_replace('\\.[^.]+$', '')
+                -%}
+
+                {%- if package_name not in packages -%}
+                  {%- set _ = packages.append(package_name) -%}
+                {%- endif -%}
+
               {%- endif -%}
+
             {%- endif -%}
+
           {%- endfor -%}
 
+          {{ packages }}
+      when:
+        - not update_check_timed_out
+        - not update_check_failed
+      no_log: true
+
+    # ---------------------------------------------------------
+    # Parse available updates.
+    # ---------------------------------------------------------
+
+    - name: Parse available updates
+      ansible.builtin.set_fact:
+        parsed_updates: >-
+          {%- set updates = [] -%}
+
           {%- for line in updates_raw.stdout_lines | default([]) -%}
-            {%- set s = line | trim -%}
-            {%- if s and
-                  not s.startswith('Loaded plugins:') and
-                  not s.startswith('Last metadata expiration check:') and
-                  s != 'Updated Packages' and
-                  s != 'Available Upgrades' and
-                  s != 'Obsoleting Packages' -%}
-              {%- set parts = s.split() -%}
+
+            {%- set text = line | trim -%}
+
+            {%- if text
+                  and not text.startswith('Last metadata expiration check:')
+                  and not text.startswith('Loaded plugins:')
+                  and text != 'Available Upgrades'
+                  and text != 'Available Packages'
+                  and text != 'Updated Packages'
+                  and text != 'Obsoleting Packages' -%}
+
+              {%- set parts = text.split() -%}
+
               {%- if parts | length >= 3 -%}
-                {%- set pkg_full = parts[0] -%}
-                {%- set pkg_name = pkg_full | regex_replace('\\.[^.]+$', '') -%}
-                {%- set pkg_arch = (pkg_full | regex_search('\\.([^.]+)$', '\\1') | default(['unknown']) | first) -%}
-                {%- set pkg_version = parts[1] -%}
-                {%- set pkg_repo = parts[2] -%}
-                {%- set _ = ns.items.append({
-                      'name': pkg_name,
-                      'arch': pkg_arch,
-                      'version': pkg_version,
-                      'repo': pkg_repo,
-                      'security': (pkg_name in security_names)
-                    }) -%}
+
+                {%- set package_full = parts[0] -%}
+
+                {%- set package_name =
+                      package_full
+                      | regex_replace('\\.[^.]+$', '')
+                -%}
+
+                {%- set arch_match =
+                      package_full
+                      | regex_search('\\.([^.]+)$', '\\1')
+                -%}
+
+                {%- set package_arch =
+                      arch_match[0]
+                      if arch_match
+                      else 'unknown'
+                -%}
+
+                {%- set package_version = parts[1] -%}
+                {%- set package_repo = parts[2] -%}
+
+                {%- set _ = updates.append({
+                      'name': package_name,
+                      'arch': package_arch,
+                      'version': package_version,
+                      'repo': package_repo,
+                      'security':
+                        package_name in
+                        (security_package_names | default([]))
+                    })
+                -%}
+
               {%- endif -%}
+
             {%- endif -%}
+
           {%- endfor -%}
 
           {{
-            ns.items
+            updates
             | sort(attribute='name')
             | sort(attribute='security', reverse=true)
           }}
+      when:
+        - not update_check_timed_out
+        - not update_check_failed
       no_log: true
 
-    - name: Show fully up-to-date hosts
-      ansible.builtin.debug:
-        msg: |
-          Host: {{ inventory_hostname }}
-          Status: Up to date
-          Total updates: 0
-          Security updates: 0
-      when: parsed_updates | length == 0
+    # ---------------------------------------------------------
+    # TIMEOUT REPORT
+    # ---------------------------------------------------------
 
-    - name: Show readable update report
+    - name: Report package manager timeout
       ansible.builtin.debug:
         msg: |
+          ============================================================
           Host: {{ inventory_hostname }}
-          Status: Updates available
-          Total updates: {{ parsed_updates | length }}
-          Security updates: {{ parsed_updates | selectattr('security', 'equalto', true) | list | length }}
+
+          STATUS: PACKAGE CHECK TIMED OUT
+
+          One or more package manager commands exceeded
+          {{ package_command_timeout }} seconds.
+
+          Update check RC:   {{ updates_raw.rc | default('unknown') }}
+          Security check RC: {{ security_raw.rc | default('unknown') }}
+
+          This usually indicates:
+            - Slow or unavailable repository
+            - DNS problem
+            - Internet connectivity problem
+            - Package manager lock
+            - Third-party repository problem
+          ============================================================
+      when: update_check_timed_out
+
+    # ---------------------------------------------------------
+    # FAILURE REPORT
+    # ---------------------------------------------------------
+
+    - name: Report package manager failure
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          Host: {{ inventory_hostname }}
+
+          STATUS: PACKAGE CHECK FAILED
+
+          Update check RC:   {{ updates_raw.rc | default('unknown') }}
+          Security check RC: {{ security_raw.rc | default('unknown') }}
+
+          Update stderr:
+          {{ updates_raw.stderr | default('') }}
+
+          Security stderr:
+          {{ security_raw.stderr | default('') }}
+          ============================================================
+      when:
+        - not update_check_timed_out
+        - update_check_failed
+
+    # ---------------------------------------------------------
+    # UP-TO-DATE REPORT
+    # ---------------------------------------------------------
+
+    - name: Report fully up-to-date host
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          Host: {{ inventory_hostname }}
+
+          Status: UP TO DATE
+
+          Total updates:    0
+          Security updates: 0
+          ============================================================
+      when:
+        - not update_check_timed_out
+        - not update_check_failed
+        - parsed_updates | default([]) | length == 0
+
+    # ---------------------------------------------------------
+    # UPDATE REPORT
+    # ---------------------------------------------------------
+
+    - name: Report available updates
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          Host: {{ inventory_hostname }}
+
+          Status: UPDATES AVAILABLE
+
+          Total updates:    {{ parsed_updates | length }}
+          Security updates: {{
+            parsed_updates
+            | selectattr('security', 'equalto', true)
+            | list
+            | length
+          }}
 
           TYPE        PACKAGE                          ARCH     VERSION                      REPO
-          ----------------------------------------------------------------------------------------
+          ------------------------------------------------------------------------------------------
           {% for pkg in parsed_updates %}
           {{ '%-11s %-32s %-8s %-28s %s' | format(
               '[SECURITY]' if pkg.security else '[OTHER]',
@@ -102,4 +307,8 @@
               pkg.repo
           ) }}
           {% endfor %}
-      when: parsed_updates | length > 0
+          ============================================================
+      when:
+        - not update_check_timed_out
+        - not update_check_failed
+        - parsed_updates | default([]) | length > 0
