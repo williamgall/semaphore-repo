@@ -1,0 +1,9 @@
+---
+- name: Test Semaphore SSH speed
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Run hostname
+      ansible.builtin.command: hostname
+      changed_when: false
