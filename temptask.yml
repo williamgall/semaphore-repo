@@ -1,0 +1,5 @@
+- name: Show Ansible configuration
+  ansible.builtin.command: ansible-config dump --only-changed
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
