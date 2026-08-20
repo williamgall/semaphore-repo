@@ -1,0 +1,36 @@
+---
+- name: Prune unused Docker images
+  hosts: docker_servers
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Show Docker disk usage before cleanup
+      ansible.builtin.command:
+        cmd: docker system df
+      register: docker_before
+      changed_when: false
+
+    - name: Display Docker usage before cleanup
+      ansible.builtin.debug:
+        var: docker_before.stdout_lines
+
+    - name: Remove dangling Docker images
+      ansible.builtin.command:
+        cmd: docker image prune -f
+      register: docker_prune
+      changed_when: "'Total reclaimed space: 0B' not in docker_prune.stdout"
+
+    - name: Display prune results
+      ansible.builtin.debug:
+        var: docker_prune.stdout_lines
+
+    - name: Show Docker disk usage after cleanup
+      ansible.builtin.command:
+        cmd: docker system df
+      register: docker_after
+      changed_when: false
+
+    - name: Display Docker usage after cleanup
+      ansible.builtin.debug:
+        var: docker_after.stdout_lines
