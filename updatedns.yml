@@ -1,0 +1,59 @@
+---
+- name: Configure DNS servers on Rocky Linux 9
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    dns_servers:
+      - "192.168.0.53"
+      - "192.168.0.49"
+
+  tasks:
+    - name: Get active NetworkManager connection
+      ansible.builtin.shell: |
+        nmcli -t -f NAME connection show --active | head -n 1
+      register: active_connection
+      changed_when: false
+
+    - name: Fail if no active NetworkManager connection was found
+      ansible.builtin.fail:
+        msg: "No active NetworkManager connection was found."
+      when: active_connection.stdout | trim == ""
+
+    - name: Display connection being modified
+      ansible.builtin.debug:
+        msg: "Configuring DNS on connection: {{ active_connection.stdout | trim }}"
+
+    - name: Configure DNS servers
+      ansible.builtin.command:
+        argv:
+          - nmcli
+          - connection
+          - modify
+          - "{{ active_connection.stdout | trim }}"
+          - ipv4.dns
+          - "{{ dns_servers | join(',') }}"
+          - ipv4.ignore-auto-dns
+          - "yes"
+      register: dns_config
+      changed_when: dns_config.rc == 0
+
+    - name: Reactivate NetworkManager connection
+      ansible.builtin.command:
+        argv:
+          - nmcli
+          - connection
+          - up
+          - "{{ active_connection.stdout | trim }}"
+      when: dns_config.changed
+
+    - name: Read current resolv.conf
+      ansible.builtin.command:
+        cmd: cat /etc/resolv.conf
+      register: resolv_conf
+      changed_when: false
+
+    - name: Display resolv.conf
+      ansible.builtin.debug:
+        var: resolv_conf.stdout_lines
