@@ -1,0 +1,22 @@
+---
+- name: Show last 10 soft lockups
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Find last 10 soft lockups
+      ansible.builtin.shell: |
+        grep -h -i "soft lockup" \
+          $(ls -tr /var/log/messages* 2>/dev/null) \
+          2>/dev/null | tail -10
+      register: soft_lockups
+      changed_when: false
+      failed_when: false
+
+    - name: Display soft lockups
+      ansible.builtin.debug:
+        msg: |
+          Last soft lockups on {{ inventory_hostname }}
+          ----------------------------------------
+          {{ soft_lockups.stdout if soft_lockups.stdout else 'No soft lockups found' }}
