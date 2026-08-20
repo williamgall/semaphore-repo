@@ -1,6 +1,6 @@
 ---
 - name: Prune unused Docker images
-  hosts: docker_servers
+  hosts: all
   become: true
   gather_facts: false
 
