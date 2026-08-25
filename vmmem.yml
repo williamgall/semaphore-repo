@@ -1,0 +1,15 @@
+---
+- name: Show VM memory allocations
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Get total memory
+      ansible.builtin.shell: |
+        awk '/MemTotal/ {printf "%.2f GiB\n", $2/1024/1024}' /proc/meminfo
+      register: memory
+      changed_when: false
+
+    - name: Display memory
+      ansible.builtin.debug:
+        msg: "{{ inventory_hostname }}: {{ memory.stdout }}"
