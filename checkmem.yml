@@ -1,0 +1,32 @@
+---
+- name: Check memory usage and huge pages
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Show free memory
+      ansible.builtin.command:
+        cmd: free -h
+      register: free_memory
+      changed_when: false
+
+    - name: Show selected memory information
+      ansible.builtin.shell: |
+        grep -E 'MemTotal|MemAvailable|SwapTotal|SwapFree|AnonHugePages' /proc/meminfo
+      register: meminfo
+      changed_when: false
+
+    - name: Display memory information
+      ansible.builtin.debug:
+        msg: |
+          {{ inventory_hostname }}
+          ========================================
+
+          free -h
+          ----------------------------------------
+          {{ free_memory.stdout }}
+
+          /proc/meminfo
+          ----------------------------------------
+          {{ meminfo.stdout }}
