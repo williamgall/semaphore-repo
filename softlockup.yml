@@ -7,7 +7,7 @@
   tasks:
     - name: Find last 10 soft lockups
       ansible.builtin.shell: |
-        grep -h "watchdog: BUG: soft lockup" \
+        grep -h ' kernel: watchdog: BUG: soft lockup' \
           $(ls -tr /var/log/messages* 2>/dev/null) \
           2>/dev/null | tail -10
       register: soft_lockups
