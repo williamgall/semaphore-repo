@@ -1,22 +1,33 @@
 ---
-- name: Show last 10 soft lockups
+- name: Show last 10 real soft lockups
   hosts: all
   become: true
   gather_facts: false
 
+  vars:
+    ansible_python_interpreter: auto_silent
+
   tasks:
-    - name: Find last 10 soft lockups
+    - name: Find last 10 real kernel soft lockups
       ansible.builtin.shell: |
-        grep -h ' kernel: watchdog: BUG: soft lockup' \
+        grep -hE '^[A-Z][a-z]{2}[[:space:]]+[0-9]+ .* kernel: watchdog: BUG: soft lockup' \
           $(ls -tr /var/log/messages* 2>/dev/null) \
           2>/dev/null | tail -10
       register: soft_lockups
       changed_when: false
       failed_when: false
 
-    - name: Display soft lockups
+    - name: Show no-lockup status
       ansible.builtin.debug:
-        msg: |
-          Last soft lockups on {{ inventory_hostname }}
-          ----------------------------------------
-          {{ soft_lockups.stdout if soft_lockups.stdout else 'No soft lockups found' }}
+        msg: "PASS | No soft lockups found"
+      when: soft_lockups.stdout_lines | length == 0
+
+    - name: Show soft lockup summary
+      ansible.builtin.debug:
+        msg: "WARNING | {{ soft_lockups.stdout_lines | length }} soft lockup(s) found"
+      when: soft_lockups.stdout_lines | length > 0
+
+    - name: Show soft lockup entries
+      ansible.builtin.debug:
+        var: soft_lockups.stdout_lines
+      when: soft_lockups.stdout_lines | length > 0
