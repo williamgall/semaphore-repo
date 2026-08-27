@@ -1,0 +1,45 @@
+---
+- name: Verify DNS configuration
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Read /etc/resolv.conf
+      ansible.builtin.command:
+        cmd: cat /etc/resolv.conf
+      register: resolv_conf
+      changed_when: false
+
+    - name: Show NetworkManager DNS settings
+      ansible.builtin.shell: |
+        nmcli dev show | grep -i 'IP4.DNS'
+      register: nmcli_dns
+      changed_when: false
+      failed_when: false
+
+    - name: Verify preferred DNS servers are present
+      ansible.builtin.shell: |
+        grep -q '^nameserver 192\.168\.0\.53$' /etc/resolv.conf &&
+        grep -q '^nameserver 192\.168\.0\.49$' /etc/resolv.conf
+      register: dns_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display DNS configuration
+      ansible.builtin.debug:
+        msg: |
+          {{ inventory_hostname }}
+          ========================================
+
+          /etc/resolv.conf
+          ----------------------------------------
+          {{ resolv_conf.stdout }}
+
+          NetworkManager DNS
+          ----------------------------------------
+          {{ nmcli_dns.stdout if nmcli_dns.stdout else 'No IP4.DNS entries found' }}
+
+          DNS verification
+          ----------------------------------------
+          {{ 'PASS - 192.168.0.53 and 192.168.0.49 are configured' if dns_check.rc == 0 else 'FAIL - expected DNS servers were not both found in /etc/resolv.conf' }}
