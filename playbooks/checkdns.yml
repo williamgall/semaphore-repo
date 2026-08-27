@@ -4,42 +4,26 @@
   become: true
   gather_facts: false
 
+  vars:
+    ansible_python_interpreter: auto_silent
+    dns_primary: "192.168.0.53"
+    dns_secondary: "192.168.0.49"
+
   tasks:
-    - name: Read /etc/resolv.conf
-      ansible.builtin.command:
-        cmd: cat /etc/resolv.conf
-      register: resolv_conf
-      changed_when: false
-
-    - name: Show NetworkManager DNS settings
+    - name: Read configured nameservers
       ansible.builtin.shell: |
-        nmcli dev show | grep -i 'IP4.DNS'
-      register: nmcli_dns
+        awk '/^nameserver/ {print $2}' /etc/resolv.conf
+      register: nameservers
       changed_when: false
-      failed_when: false
 
-    - name: Verify preferred DNS servers are present
-      ansible.builtin.shell: |
-        grep -q '^nameserver 192\.168\.0\.53$' /etc/resolv.conf &&
-        grep -q '^nameserver 192\.168\.0\.49$' /etc/resolv.conf
-      register: dns_check
-      changed_when: false
-      failed_when: false
+    - name: Check primary DNS
+      ansible.builtin.set_fact:
+        primary_ok: "{{ dns_primary in nameservers.stdout_lines }}"
 
-    - name: Display DNS configuration
+    - name: Check secondary DNS
+      ansible.builtin.set_fact:
+        secondary_ok: "{{ dns_secondary in nameservers.stdout_lines }}"
+
+    - name: DNS verification result
       ansible.builtin.debug:
-        msg: |
-          {{ inventory_hostname }}
-          ========================================
-
-          /etc/resolv.conf
-          ----------------------------------------
-          {{ resolv_conf.stdout }}
-
-          NetworkManager DNS
-          ----------------------------------------
-          {{ nmcli_dns.stdout if nmcli_dns.stdout else 'No IP4.DNS entries found' }}
-
-          DNS verification
-          ----------------------------------------
-          {{ 'PASS - 192.168.0.53 and 192.168.0.49 are configured' if dns_check.rc == 0 else 'FAIL - expected DNS servers were not both found in /etc/resolv.conf' }}
+        msg: "{{ 'PASS' if primary_ok and secondary_ok else 'FAIL' }} | DNS: {{ nameservers.stdout_lines | join(', ') }}"
