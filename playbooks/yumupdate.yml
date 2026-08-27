@@ -1,0 +1,42 @@
+---
+- name: Check for available package updates
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    ansible_python_interpreter: auto_silent
+
+  tasks:
+    - name: Check available updates
+      ansible.builtin.command:
+        cmd: dnf -q check-update
+      register: dnf_updates
+      changed_when: false
+
+      # dnf check-update returns:
+      # 0   = no updates
+      # 100 = updates available
+      failed_when: dnf_updates.rc not in [0, 100]
+
+    - name: Build package update list
+      ansible.builtin.set_fact:
+        update_packages: >-
+          {{
+            dnf_updates.stdout_lines
+            | select('match', '^[A-Za-z0-9_.+:-]+[ \t]+')
+            | map('regex_replace', '^([^ \t]+).*$', '\1')
+            | list
+          }}
+
+    - name: Show update summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname_short }}
+          {{ update_packages | length }}
+          {{ 'update' if update_packages | length == 1 else 'updates' }}
+
+    - name: Show available updates
+      ansible.builtin.debug:
+        var: update_packages
+      when: update_packages | length > 0
