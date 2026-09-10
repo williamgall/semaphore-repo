@@ -1,0 +1,32 @@
+---
+- name: Force time synchronization with Chrony
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Ensure chronyd is running
+      ansible.builtin.service:
+        name: chronyd
+        state: started
+        enabled: true
+
+    - name: Force Chrony to step the system clock
+      ansible.builtin.command:
+        cmd: chronyc makestep
+      register: chrony_makestep
+      changed_when: "'200 OK' in chrony_makestep.stdout"
+
+    - name: Show Chrony synchronization result
+      ansible.builtin.debug:
+        var: chrony_makestep.stdout_lines
+
+    - name: Display current Chrony tracking status
+      ansible.builtin.command:
+        cmd: chronyc tracking
+      register: chrony_tracking
+      changed_when: false
+
+    - name: Show Chrony tracking status
+      ansible.builtin.debug:
+        var: chrony_tracking.stdout_lines
