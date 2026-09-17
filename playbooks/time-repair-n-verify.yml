@@ -1,0 +1,131 @@
+---
+- name: Configure and verify VM time synchronization
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    # ---------------------------------------------------------
+    # VMware Tools
+    # ---------------------------------------------------------
+
+    - name: Check if VMware Tools is available
+      ansible.builtin.command:
+        cmd: vmware-toolbox-cmd -v
+      register: vmware_tools
+      changed_when: false
+      failed_when: false
+
+    - name: Get VMware time sync status
+      ansible.builtin.command:
+        cmd: vmware-toolbox-cmd timesync status
+      register: vmware_timesync_before
+      changed_when: false
+      failed_when: false
+      when: vmware_tools.rc == 0
+
+    - name: Disable VMware Tools time synchronization
+      ansible.builtin.command:
+        cmd: vmware-toolbox-cmd timesync disable
+      when:
+        - vmware_tools.rc == 0
+        - "'Enabled' in vmware_timesync_before.stdout"
+      register: vmware_timesync_disabled
+      changed_when: vmware_timesync_disabled.rc == 0
+
+    # ---------------------------------------------------------
+    # Chrony
+    # ---------------------------------------------------------
+
+    - name: Ensure Chrony is installed
+      ansible.builtin.package:
+        name: chrony
+        state: present
+
+    - name: Ensure chronyd is enabled and running
+      ansible.builtin.systemd:
+        name: chronyd
+        enabled: true
+        state: started
+
+    # ---------------------------------------------------------
+    # Synchronize
+    # ---------------------------------------------------------
+
+    - name: Force Chrony to step clock if necessary
+      ansible.builtin.command:
+        cmd: chronyc makestep
+      register: makestep
+      changed_when: false
+      failed_when: false
+
+    - name: Wait for Chrony synchronization
+      ansible.builtin.command:
+        cmd: chronyc waitsync 10 0.1
+      register: chrony_waitsync
+      changed_when: false
+      failed_when: false
+
+    # ---------------------------------------------------------
+    # Gather final status
+    # ---------------------------------------------------------
+
+    - name: Get VMware time sync status
+      ansible.builtin.command:
+        cmd: vmware-toolbox-cmd timesync status
+      register: vmware_timesync
+      changed_when: false
+      failed_when: false
+      when: vmware_tools.rc == 0
+
+    - name: Get Chrony tracking information
+      ansible.builtin.command:
+        cmd: chronyc tracking
+      register: chrony_tracking
+      changed_when: false
+      failed_when: false
+
+    - name: Get Chrony sources
+      ansible.builtin.command:
+        cmd: chronyc sources
+      register: chrony_sources
+      changed_when: false
+      failed_when: false
+
+    - name: Get timedatectl synchronization status
+      ansible.builtin.command:
+        cmd: timedatectl show
+      register: timedatectl_status
+      changed_when: false
+      failed_when: false
+
+    - name: Get current system time
+      ansible.builtin.command:
+        cmd: date
+      register: current_time
+      changed_when: false
+
+    - name: Get current clocksource
+      ansible.builtin.command:
+        cmd: cat /sys/devices/system/clocksource/clocksource0/current_clocksource
+      register: clocksource
+      changed_when: false
+      failed_when: false
+
+    # ---------------------------------------------------------
+    # Report
+    # ---------------------------------------------------------
+
+    - name: Display time synchronization status
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "{{ inventory_hostname }}"
+          - "============================================"
+          - "Time:             {{ current_time.stdout }}"
+          - "VMware TimeSync:  {{ vmware_timesync.stdout | default('Not Available') }}"
+          - "Chronyd:          Running / Enabled"
+          - "Clocksource:      {{ clocksource.stdout | default('Unknown') }}"
+          - "NTP Synchronized: {{ 'YES' if 'NTPSynchronized=yes' in timedatectl_status.stdout else 'NO' }}"
+          - "Chrony waitsync:  {{ 'OK' if chrony_waitsync.rc == 0 else 'FAILED' }}"
+          - "============================================"
