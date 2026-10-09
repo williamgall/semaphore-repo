@@ -1,7 +1,7 @@
 
 ---
 - name: Backup Super Productivity
-  hosts: ops9
+  hosts: ops9.3dgw.com
   become: true
   gather_facts: false
 
