@@ -1,0 +1,94 @@
+
+---
+- name: Backup Super Productivity
+  hosts: ops9
+  become: true
+  gather_facts: false
+
+  vars:
+    app_dir: /opt/super-productivity
+    backup_dir: /opt/backups/super-productivity
+    retention_days: 30
+
+  tasks:
+    - name: Verify application directory exists
+      ansible.builtin.stat:
+        path: "{{ app_dir }}"
+      register: app_directory
+
+    - name: Fail if application directory is missing
+      ansible.builtin.assert:
+        that:
+          - app_directory.stat.isdir | default(false)
+        fail_msg: "Super Productivity directory not found"
+
+    - name: Create secure backup directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Generate backup timestamp
+      ansible.builtin.command:
+        cmd: date +%Y-%m-%d_%H%M%S
+      register: backup_timestamp
+      changed_when: false
+
+    - name: Set backup filename
+      ansible.builtin.set_fact:
+        backup_file: >-
+          {{ backup_dir }}/super-productivity-{{
+          backup_timestamp.stdout }}.tar.gz
+
+    - name: Create backup archive
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -czf
+          - "{{ backup_file }}"
+          - -C
+          - /opt
+          - super-productivity
+
+    - name: Secure backup archive
+      ansible.builtin.file:
+        path: "{{ backup_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Verify archive integrity
+      ansible.builtin.command:
+        argv:
+          - tar
+          - -tzf
+          - "{{ backup_file }}"
+      register: backup_verify
+      changed_when: false
+
+    - name: Find expired backups
+      ansible.builtin.find:
+        paths: "{{ backup_dir }}"
+        patterns: "super-productivity-*.tar.gz"
+        age: "{{ retention_days }}d"
+        file_type: file
+      register: old_backups
+
+    - name: Remove expired backups
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_backups.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Display backup summary
+      ansible.builtin.debug:
+        msg:
+          - "Host: {{ inventory_hostname }}"
+          - "Backup: {{ backup_file }}"
+          - "Archive verification: PASSED"
+          - "Retention: {{ retention_days }} days"
+          - "Expired backups removed: {{ old_backups.matched }}"
