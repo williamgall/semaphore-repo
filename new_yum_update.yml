@@ -7,7 +7,7 @@
   tasks:
     - name: Determine package manager command
       ansible.builtin.set_fact:
-        pkg_mgr_cmd: "{{ 'dnf' if ansible_pkg_mgr == 'dnf' else 'yum' }}"
+        pkg_mgr_cmd: "{{ 'dnf' if ansible_facts['pkg_mgr'] == 'dnf' else 'yum' }}"
 
     - name: Gather available updates
       ansible.builtin.command: "{{ pkg_mgr_cmd }} -q list updates"
