@@ -1,0 +1,95 @@
+---
+# Run from a Semaphore checkout of this repository.
+# The Git checkout is the source for Compose; .env stays private on each host.
+- name: Deploy WUD in /opt/wud
+  hosts: wud_hosts
+  become: true
+  gather_facts: false
+  vars:
+    wud_dir: /opt/wud
+    wud_legacy_dir: /home/wgall/wud
+    wud_force_apply: false
+  tasks:
+    - name: Check for private environment at new location
+      ansible.builtin.stat:
+        path: "{{ wud_dir }}/.env"
+      register: new_env
+
+    - name: Check for private environment at legacy location
+      ansible.builtin.stat:
+        path: "{{ wud_legacy_dir }}/.env"
+      register: old_env
+
+    - name: Require an existing private environment
+      ansible.builtin.assert:
+        that:
+          - new_env.stat.isreg | default(false) or old_env.stat.isreg | default(false)
+        fail_msg: >-
+          No .env found in {{ wud_dir }} or {{ wud_legacy_dir }}.
+          Create one from .env.example, with real host-specific values, before deploying.
+
+    - name: Create deployment directory
+      ansible.builtin.file:
+        path: "{{ wud_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Migrate private environment once, without overwriting an existing one
+      ansible.builtin.copy:
+        src: "{{ wud_legacy_dir }}/.env"
+        dest: "{{ wud_dir }}/.env"
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      when: not (new_env.stat.exists | default(false)) and (old_env.stat.isreg | default(false))
+      no_log: true
+      register: migrated_env
+
+    - name: Ensure private environment is protected
+      ansible.builtin.file:
+        path: "{{ wud_dir }}/.env"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+
+    - name: Copy shared Compose configuration from Semaphore checkout
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../docker-compose.yml"
+        dest: "{{ wud_dir }}/docker-compose.yml"
+        owner: root
+        group: root
+        mode: '0644'
+        backup: true
+      register: compose_copy
+
+    - name: Validate new Compose configuration
+      ansible.builtin.command:
+        argv: [docker, compose, --project-directory, "{{ wud_dir }}", config, --quiet]
+      changed_when: false
+      no_log: true
+
+    - name: Apply WUD configuration (only recreate if Compose determines it changed)
+      ansible.builtin.command:
+        argv: [docker, compose, --project-directory, "{{ wud_dir }}", up, -d, --no-deps, whatsupdocker]
+      when: compose_copy.changed or (migrated_env.changed | default(false)) or (wud_force_apply | bool)
+      register: wud_apply
+      changed_when: "'Recreated' in wud_apply.stdout or 'Created' in wud_apply.stdout or 'Started' in wud_apply.stdout or 'Recreated' in wud_apply.stderr or 'Created' in wud_apply.stderr or 'Started' in wud_apply.stderr"
+
+    - name: Inspect WUD container status
+      ansible.builtin.command:
+        argv: [docker, inspect, --format, '{% raw %}{{.State.Status}}{% endraw %}', wud]
+      register: wud_status
+      changed_when: false
+
+    - name: Report result
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: WUD {{ wud_status.stdout }};
+          Compose changed={{ compose_copy.changed }};
+          .env migrated={{ migrated_env.changed | default(false) }}.
+          Legacy directory, if any, was left intact for rollback.
